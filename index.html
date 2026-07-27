@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>アメダス気温ランキング（実測）</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --text: #f1f5f9;
+      --accent: #38bdf8;
+      --hot: #f87171;
+      --cool: #60a5fa;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Hiragino Sans", "Noto Sans JP", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 1.2rem;
+    }
+    h1 {
+      text-align: center;
+      font-size: 1.6rem;
+      color: var(--accent);
+      margin-bottom: 0.3rem;
+    }
+    .subtitle {
+      text-align: center;
+      color: #94a3b8;
+      font-size: 0.9rem;
+      margin-bottom: 1.2rem;
+    }
+    .controls {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 0.8rem;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+    }
+    button {
+      background: var(--accent);
+      color: #0f172a;
+      border: none;
+      padding: 0.55rem 1.1rem;
+      border-radius: 8px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .limit-box {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      color: #94a3b8;
+      font-size: 0.9rem;
+    }
+    .limit-box input {
+      width: 70px;
+      padding: 0.4rem 0.5rem;
+      border-radius: 6px;
+      border: 1px solid #475569;
+      background: var(--card);
+      color: var(--text);
+      text-align: center;
+      font-size: 0.95rem;
+    }
+    .status {
+      text-align: center;
+      color: #94a3b8;
+      font-size: 0.85rem;
+      margin-bottom: 0.8rem;
+    }
+    .ranking {
+      max-width: 640px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .item {
+      display: flex;
+      align-items: center;
+      background: var(--card);
+      border-radius: 10px;
+      padding: 0.75rem 1rem;
+      gap: 0.8rem;
+    }
+    .rank {
+      font-size: 1.25rem;
+      font-weight: bold;
+      width: 2rem;
+      text-align: center;
+      color: var(--accent);
+    }
+    .rank.top1 { color: #fbbf24; }
+    .rank.top2 { color: #94a3b8; }
+    .rank.top3 { color: #cd7f32; }
+    .info { flex: 1; }
+    .city { font-size: 1.05rem; font-weight: 600; }
+    .meta { font-size: 0.75rem; color: #94a3b8; }
+    .temp {
+      font-size: 1.35rem;
+      font-weight: bold;
+      min-width: 4.2rem;
+      text-align: right;
+    }
+    .temp.hot { color: var(--hot); }
+    .temp.cool { color: var(--cool); }
+    .footer {
+      text-align: center;
+      margin-top: 1.8rem;
+      font-size: 0.75rem;
+      color: #64748b;
+    }
+    .footer a { color: var(--accent); }
+    .loading {
+      text-align: center;
+      padding: 2rem;
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+  <h1>🌡️ アメダス気温ランキング</h1>
+  <p class="subtitle">気象庁アメダス実測値（10分更新）</p>
+
+  <div class="controls">
+    <button id="refreshBtn" onclick="fetchAmedas()">更新する</button>
+    <button onclick="toggleSort()">並び順切替</button>
+    <div class="limit-box">
+      表示件数:
+      <input type="number" id="limitInput" value="100" min="10" max="1300" step="10">
+      件
+    </div>
+  </div>
+
+  <div class="status" id="status">読み込み中...</div>
+  <div class="ranking" id="ranking">
+    <div class="loading">データを取得しています...</div>
+  </div>
+
+  <div class="footer">
+    出典: <a href="https://www.jma.go.jp/bosai/amedas/" target="_blank">気象庁アメダス</a>
+  </div>
+
+  <script>
+    let sortDesc = true;
+    let currentData = [];
+    let stationTable = null;
+    let lastUpdateText = "-";
+
+    // 日時を 2026/07/27 12:20:00 形式に整形
+    function formatDateTime(isoText) {
+      const dt = new Date(isoText);
+      const y = dt.getFullYear();
+      const m = String(dt.getMonth() + 1).padStart(2, "0");
+      const d = String(dt.getDate()).padStart(2, "0");
+      const h = String(dt.getHours()).padStart(2, "0");
+      const min = String(dt.getMinutes()).padStart(2, "0");
+      const sec = String(dt.getSeconds()).padStart(2, "0");
+      return `${y}/${m}/${d} ${h}:${min}:${sec}`;
+    }
+
+    function getLimit() {
+      const val = parseInt(document.getElementById("limitInput").value, 10);
+      if (isNaN(val) || val < 1) return 100;
+      return Math.min(val, 1300); // 最大1300件程度
+    }
+
+    async function fetchAmedas() {
+      const btn = document.getElementById("refreshBtn");
+      btn.disabled = true;
+      document.getElementById("status").textContent = "取得中...";
+
+      try {
+        // 1. 観測所マスタ（初回のみ）
+        if (!stationTable) {
+          const tableRes = await fetch("https://www.jma.go.jp/bosai/amedas/const/amedastable.json");
+          stationTable = await tableRes.json();
+        }
+
+        // 2. 最新時刻
+        const timeRes = await fetch("https://www.jma.go.jp/bosai/amedas/data/latest_time.txt");
+        const latestText = (await timeRes.text()).trim();
+        const dt = new Date(latestText);
+
+        const y = dt.getFullYear();
+        const m = String(dt.getMonth() + 1).padStart(2, "0");
+        const d = String(dt.getDate()).padStart(2, "0");
+        const h = String(dt.getHours()).padStart(2, "0");
+        const min = String(dt.getMinutes()).padStart(2, "0");
+        const timeKey = `${y}${m}${d}${h}${min}00`;
+
+        // 3. 全国マップデータ
+        const mapRes = await fetch(`https://www.jma.go.jp/bosai/amedas/data/map/${timeKey}.json`);
+        if (!mapRes.ok) throw new Error("マップデータ取得失敗");
+        const mapData = await mapRes.json();
+
+        // 4. 気温がある地点だけ抽出
+        currentData = [];
+        for (const [code, obs] of Object.entries(mapData)) {
+          if (!obs.temp || !Array.isArray(obs.temp) || obs.temp[0] === "" || obs.temp[0] == null) continue;
+          const temp = parseFloat(obs.temp[0]);
+          if (isNaN(temp)) continue;
+
+          const st = stationTable[code] || {};
+          currentData.push({
+            code,
+            name: st.kjName || code,
+            temp
+          });
+        }
+
+        lastUpdateText = formatDateTime(latestText);
+        render();
+      } catch (err) {
+        console.error(err);
+        document.getElementById("status").textContent = "取得失敗（CORSの可能性があります）";
+        document.getElementById("ranking").innerHTML = `
+          <div class="loading">
+            CORSエラーの可能性が高いです。<br>
+            ブラウザ拡張でCORSを一時解除するか、<br>
+            プロキシ版の利用を検討してください。
+          </div>`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function render() {
+      const limit = getLimit();
+      const sorted = [...currentData].sort((a, b) =>
+        sortDesc ? b.temp - a.temp : a.temp - b.temp
+      );
+
+      // 表示件数を適用
+      const displayData = sorted.slice(0, limit);
+
+      const html = displayData.map((d, i) => {
+        const rankClass = i === 0 ? "top1" : i === 1 ? "top2" : i === 2 ? "top3" : "";
+        const tempClass = d.temp >= 30 ? "hot" : d.temp <= 10 ? "cool" : "";
+        return `
+          <div class="item">
+            <div class="rank ${rankClass}">${i + 1}</div>
+            <div class="info">
+              <div class="city">${d.name}</div>
+              <div class="meta">観測所番号: ${d.code}</div>
+            </div>
+            <div class="temp ${tempClass}">${d.temp.toFixed(1)}℃</div>
+          </div>`;
+      }).join("");
+
+      document.getElementById("ranking").innerHTML =
+        html || `<div class="loading">データなし</div>`;
+
+      // ステータスに時間を追加
+      document.getElementById("status").textContent =
+        `${currentData.length}地点のアメダスデータを表示中　${lastUpdateText}`;
+    }
+
+    function toggleSort() {
+      sortDesc = !sortDesc;
+      render();
+    }
+
+    // 表示件数変更時に再描画
+    document.getElementById("limitInput").addEventListener("change", render);
+    document.getElementById("limitInput").addEventListener("keyup", (e) => {
+      if (e.key === "Enter") render();
+    });
+
+    // 初回取得 + 5分ごと自動更新
+    fetchAmedas();
+    setInterval(fetchAmedas, 5 * 60 * 1000);
+  </script>
+</body>
+</html>
