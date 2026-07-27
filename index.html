@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="アメダス気温">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>アメダス気温ランキング（実測）</title>
@@ -124,6 +130,13 @@
     }
   </style>
 </head>
+  <script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./service-worker.js");
+  });
+}
+</script>
 <body>
   <h1>🌡️ アメダス気温ランキング</h1>
   <p class="subtitle">気象庁アメダス実測値（10分更新）</p>
