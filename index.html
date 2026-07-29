@@ -16,7 +16,9 @@
       --card: #1e293b;
       --text: #f1f5f9;
       --accent: #38bdf8;
-      --hot: #f87171;
+      --mmhot: #8000a0;
+      --mhot: #f87171;
+      --hot: #ff8000;
       --cool: #60a5fa;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -114,6 +116,8 @@
       min-width: 4.2rem;
       text-align: right;
     }
+    .temp.mmhot { color: var(--mmhot); }
+    .temp.mhot { color: var(--mhot); }
     .temp.hot { color: var(--hot); }
     .temp.cool { color: var(--cool); }
     .footer {
@@ -272,7 +276,7 @@
 
       const html = displayData.map((d, i) => {
         const rankClass = i === 0 ? "top1" : i === 1 ? "top2" : i === 2 ? "top3" : "";
-        const tempClass = d.temp >= 30 ? "hot" : d.temp <= 10 ? "cool" : "";
+        const tempClass = d.temp >= 40 ? "mmhot" : d.temp < 40 && d.temp >= 35 ? "mhot" : d.temp < 35 && d.temp >= 30 ? "hot" : d.temp >= 10 ? "cool" : "";
         return `
           <div class="item">
             <div class="rank ${rankClass}">${i + 1}</div>
