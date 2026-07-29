@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <link rel="manifest" href="manifest.json">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#0f172a">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="アメダス気温">
+  <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>アメダス気温ランキング（実測）</title>
   <style>
     :root {
@@ -128,15 +128,13 @@
       padding: 2rem;
       color: #94a3b8;
     }
+    /* インストールボタン用 */
+    #installBtn {
+      display: none;
+      background: #22c55e;
+    }
   </style>
 </head>
-  <script>
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js");
-  });
-}
-</script>
 <body>
   <h1>🌡️ アメダス気温ランキング</h1>
   <p class="subtitle">気象庁アメダス実測値（10分更新）</p>
@@ -144,6 +142,7 @@ if ("serviceWorker" in navigator) {
   <div class="controls">
     <button id="refreshBtn" onclick="fetchAmedas()">更新する</button>
     <button onclick="toggleSort()">並び順切替</button>
+    <button id="installBtn">アプリをインストール</button>
     <div class="limit-box">
       表示件数:
       <input type="number" id="limitInput" value="100" min="10" max="1300" step="10">
@@ -165,8 +164,32 @@ if ("serviceWorker" in navigator) {
     let currentData = [];
     let stationTable = null;
     let lastUpdateText = "-";
+    let deferredPrompt = null;
 
-    // 日時を 2026/07/27 12:20:00 形式に整形
+    // PWAインストールボタン
+    window.addEventListener("beforeinstallprompt", (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      document.getElementById("installBtn").style.display = "inline-block";
+    });
+
+    document.getElementById("installBtn").addEventListener("click", async () => {
+      if (!deferredPrompt) return;
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === "accepted") {
+        document.getElementById("installBtn").style.display = "none";
+      }
+      deferredPrompt = null;
+    });
+
+    // Service Worker登録
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("./sw.js")
+        .then((reg) => console.log("SW registered", reg.scope))
+        .catch((err) => console.log("SW registration failed", err));
+    }
+
     function formatDateTime(isoText) {
       const dt = new Date(isoText);
       const y = dt.getFullYear();
@@ -181,7 +204,7 @@ if ("serviceWorker" in navigator) {
     function getLimit() {
       const val = parseInt(document.getElementById("limitInput").value, 10);
       if (isNaN(val) || val < 1) return 100;
-      return Math.min(val, 1300); // 最大1300件程度
+      return Math.min(val, 1300);
     }
 
     async function fetchAmedas() {
@@ -190,13 +213,11 @@ if ("serviceWorker" in navigator) {
       document.getElementById("status").textContent = "取得中...";
 
       try {
-        // 1. 観測所マスタ（初回のみ）
         if (!stationTable) {
           const tableRes = await fetch("https://www.jma.go.jp/bosai/amedas/const/amedastable.json");
           stationTable = await tableRes.json();
         }
 
-        // 2. 最新時刻
         const timeRes = await fetch("https://www.jma.go.jp/bosai/amedas/data/latest_time.txt");
         const latestText = (await timeRes.text()).trim();
         const dt = new Date(latestText);
@@ -208,12 +229,10 @@ if ("serviceWorker" in navigator) {
         const min = String(dt.getMinutes()).padStart(2, "0");
         const timeKey = `${y}${m}${d}${h}${min}00`;
 
-        // 3. 全国マップデータ
         const mapRes = await fetch(`https://www.jma.go.jp/bosai/amedas/data/map/${timeKey}.json`);
         if (!mapRes.ok) throw new Error("マップデータ取得失敗");
         const mapData = await mapRes.json();
 
-        // 4. 気温がある地点だけ抽出
         currentData = [];
         for (const [code, obs] of Object.entries(mapData)) {
           if (!obs.temp || !Array.isArray(obs.temp) || obs.temp[0] === "" || obs.temp[0] == null) continue;
@@ -249,8 +268,6 @@ if ("serviceWorker" in navigator) {
       const sorted = [...currentData].sort((a, b) =>
         sortDesc ? b.temp - a.temp : a.temp - b.temp
       );
-
-      // 表示件数を適用
       const displayData = sorted.slice(0, limit);
 
       const html = displayData.map((d, i) => {
@@ -270,7 +287,6 @@ if ("serviceWorker" in navigator) {
       document.getElementById("ranking").innerHTML =
         html || `<div class="loading">データなし</div>`;
 
-      // ステータスに時間を追加
       document.getElementById("status").textContent =
         `${currentData.length}地点のアメダスデータを表示中　${lastUpdateText}`;
     }
@@ -280,13 +296,11 @@ if ("serviceWorker" in navigator) {
       render();
     }
 
-    // 表示件数変更時に再描画
     document.getElementById("limitInput").addEventListener("change", render);
     document.getElementById("limitInput").addEventListener("keyup", (e) => {
       if (e.key === "Enter") render();
     });
 
-    // 初回取得 + 5分ごと自動更新
     fetchAmedas();
     setInterval(fetchAmedas, 5 * 60 * 1000);
   </script>
