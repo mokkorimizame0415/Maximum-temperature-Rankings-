@@ -2,25 +2,22 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#0f172a">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="アメダス気温">
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <title>アメダス気温ランキング（実測）</title>
+  <title>アメダス気温ランキング</title>
   <style>
     :root {
-      --bg: #ffffff;
-      --card: #c8c8ff;
-      --text: #202080;
+      --bg: #0f172a;
+      --card: #1e293b;
+      --text: #f1f5f9;
       --accent: #38bdf8;
-      --mmhot: #8000a0;
-      --mhot: #f87171;
-      --hot: #ff8000;
+      --hot: #f87171;
       --cool: #60a5fa;
-      --mcool: #0050FF;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -29,6 +26,7 @@
       color: var(--text);
       min-height: 100vh;
       padding: 1.2rem;
+      padding-bottom: calc(1.2rem + env(safe-area-inset-bottom));
     }
     h1 {
       text-align: center;
@@ -47,7 +45,7 @@
       justify-content: center;
       align-items: center;
       gap: 0.8rem;
-      margin-bottom: 1rem;
+      margin-bottom: 0.8rem;
       flex-wrap: wrap;
     }
     button {
@@ -60,23 +58,24 @@
       cursor: pointer;
     }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .limit-box {
+    .limit-box, .search-box {
       display: flex;
       align-items: center;
       gap: 0.4rem;
       color: #94a3b8;
       font-size: 0.9rem;
     }
-    .limit-box input {
-      width: 70px;
+    .limit-box input,
+    .search-box input {
       padding: 0.4rem 0.5rem;
       border-radius: 6px;
       border: 1px solid #475569;
       background: var(--card);
       color: var(--text);
-      text-align: center;
       font-size: 0.95rem;
     }
+    .limit-box input { width: 70px; text-align: center; }
+    .search-box input { width: 160px; }
     .status {
       text-align: center;
       color: #94a3b8;
@@ -117,11 +116,8 @@
       min-width: 4.2rem;
       text-align: right;
     }
-    .temp.mmhot { color: var(--mmhot); }
-    .temp.mhot { color: var(--mhot); }
     .temp.hot { color: var(--hot); }
     .temp.cool { color: var(--cool); }
-    .temp.mcool { color: var(--mcool); }
     .footer {
       text-align: center;
       margin-top: 1.8rem;
@@ -134,7 +130,6 @@
       padding: 2rem;
       color: #94a3b8;
     }
-    /* インストールボタン用 */
     #installBtn {
       display: none;
       background: #22c55e;
@@ -156,6 +151,13 @@
     </div>
   </div>
 
+  <div class="controls">
+    <div class="search-box">
+      地点検索:
+      <input type="text" id="searchInput" placeholder="例: 東京 / 札幌" autocomplete="off">
+    </div>
+  </div>
+
   <div class="status" id="status">読み込み中...</div>
   <div class="ranking" id="ranking">
     <div class="loading">データを取得しています...</div>
@@ -172,7 +174,12 @@
     let lastUpdateText = "-";
     let deferredPrompt = null;
 
-    // PWAインストールボタン
+    // Service Worker 登録
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("./sw.js").catch(console.error);
+    }
+
+    // インストールプロンプト
     window.addEventListener("beforeinstallprompt", (e) => {
       e.preventDefault();
       deferredPrompt = e;
@@ -182,19 +189,10 @@
     document.getElementById("installBtn").addEventListener("click", async () => {
       if (!deferredPrompt) return;
       deferredPrompt.prompt();
-      const { outcome } = await deferredPrompt.userChoice;
-      if (outcome === "accepted") {
-        document.getElementById("installBtn").style.display = "none";
-      }
+      await deferredPrompt.userChoice;
       deferredPrompt = null;
+      document.getElementById("installBtn").style.display = "none";
     });
-
-    // Service Worker登録
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("./sw.js")
-        .then((reg) => console.log("SW registered", reg.scope))
-        .catch((err) => console.log("SW registration failed", err));
-    }
 
     function formatDateTime(isoText) {
       const dt = new Date(isoText);
@@ -211,6 +209,10 @@
       const val = parseInt(document.getElementById("limitInput").value, 10);
       if (isNaN(val) || val < 1) return 100;
       return Math.min(val, 1300);
+    }
+
+    function getSearchQuery() {
+      return (document.getElementById("searchInput").value || "").trim().toLowerCase();
     }
 
     async function fetchAmedas() {
@@ -257,12 +259,11 @@
         render();
       } catch (err) {
         console.error(err);
-        document.getElementById("status").textContent = "取得失敗（CORSの可能性があります）";
+        document.getElementById("status").textContent = "取得失敗（CORS or オフラインの可能性）";
         document.getElementById("ranking").innerHTML = `
           <div class="loading">
-            CORSエラーの可能性が高いです。<br>
-            ブラウザ拡張でCORSを一時解除するか、<br>
-            プロキシ版の利用を検討してください。
+            データ取得に失敗しました。<br>
+            オンライン環境で再試行するか、CORS設定を確認してください。
           </div>`;
       } finally {
         btn.disabled = false;
@@ -271,14 +272,25 @@
 
     function render() {
       const limit = getLimit();
-      const sorted = [...currentData].sort((a, b) =>
+      const query = getSearchQuery();
+
+      let filtered = currentData;
+      if (query) {
+        filtered = currentData.filter(d =>
+          d.name.toLowerCase().includes(query) ||
+          String(d.code).includes(query)
+        );
+      }
+
+      const sorted = [...filtered].sort((a, b) =>
         sortDesc ? b.temp - a.temp : a.temp - b.temp
       );
+
       const displayData = sorted.slice(0, limit);
 
       const html = displayData.map((d, i) => {
         const rankClass = i === 0 ? "top1" : i === 1 ? "top2" : i === 2 ? "top3" : "";
-        const tempClass = d.temp >= 40 ? "mmhot" : d.temp < 40 && d.temp >= 35 ? "mhot" : d.temp < 35 && d.temp >= 30 ? "hot" : d.temp > 0 && d.temp <= 10 ? "cool" : d.temp <= 0 ? "mcool" : "";
+        const tempClass = d.temp >= 30 ? "hot" : d.temp <= 10 ? "cool" : "";
         return `
           <div class="item">
             <div class="rank ${rankClass}">${i + 1}</div>
@@ -291,10 +303,15 @@
       }).join("");
 
       document.getElementById("ranking").innerHTML =
-        html || `<div class="loading">データなし</div>`;
+        html || `<div class="loading">${query ? "該当する地点がありません" : "データなし"}</div>`;
 
-      document.getElementById("status").textContent =
-        `${currentData.length}地点のアメダスデータを表示中　${lastUpdateText}`;
+      if (query) {
+        document.getElementById("status").textContent =
+          `「${query}」の検索結果: ${filtered.length}地点 / 全${currentData.length}地点　${lastUpdateText}`;
+      } else {
+        document.getElementById("status").textContent =
+          `${currentData.length}地点のアメダスデータを表示中　${lastUpdateText}`;
+      }
     }
 
     function toggleSort() {
@@ -306,6 +323,7 @@
     document.getElementById("limitInput").addEventListener("keyup", (e) => {
       if (e.key === "Enter") render();
     });
+    document.getElementById("searchInput").addEventListener("input", render);
 
     fetchAmedas();
     setInterval(fetchAmedas, 5 * 60 * 1000);
